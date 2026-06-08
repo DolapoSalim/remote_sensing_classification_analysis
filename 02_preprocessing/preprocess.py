@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import (EPOCHS, RAW_DIR, PROCESSED_DIR,
                     NDWI_THRESHOLD, GLCM_WINDOW, GLCM_LEVELS, FEATURE_NAMES)
-from utils.io import read_rgb, save_feature_stack
+from utils.io import read_rgb, read_alpha_mask, save_feature_stack
 from utils.corrections import (compute_water_mask, sunglint_correction,
                                 lyzenga_indices, compute_glcm_features)
 
@@ -32,7 +32,7 @@ from utils.corrections import (compute_water_mask, sunglint_correction,
 # =============================================================================
 
 def build_feature_stack(year):
-    tif_path = RAW_DIR / f"pianosa_{year}_RGB.tif"
+    tif_path = RAW_DIR / f"pianosa_{year}_RGBA.tif"
     feat_out  = PROCESSED_DIR / f"features_{year}.npy"
     mask_out  = PROCESSED_DIR / f"watermask_{year}.npy"
 
@@ -42,15 +42,22 @@ def build_feature_stack(year):
 
     print(f"\n── Preprocessing {year} ──")
 
-    # 1. Load raw RGB
+    # 1. Load raw RGB (alpha handled separately)
     r_raw, g_raw, b_raw, profile = read_rgb(tif_path)
     print(f"  Image size: {r_raw.shape[1]} × {r_raw.shape[0]} px")
 
-    # 2. Water mask
-    print("  Computing water mask (NDWI)...")
-    water_mask = compute_water_mask(r_raw, g_raw, threshold=NDWI_THRESHOLD)
+    # 2. Alpha mask from the RGBA GeoTIFF (land = False, transparent pixels)
+    #    This is the primary land mask — it's exactly what the server sent.
+    alpha_mask = read_alpha_mask(tif_path)
+    print(f"  Alpha mask (non-transparent): {alpha_mask.mean()*100:.1f}% of pixels")
+
+    # 3. NDWI water mask as a secondary filter within the valid (non-land) area.
+    #    Combines with alpha: a pixel is "water" only if it is both
+    #    non-transparent AND has a positive NDWI value.
+    ndwi_mask  = compute_water_mask(r_raw, g_raw, threshold=NDWI_THRESHOLD)
+    water_mask = alpha_mask & ndwi_mask
     water_pct  = water_mask.mean() * 100
-    print(f"    Water pixels: {water_pct:.1f}%")
+    print(f"  Water mask (alpha + NDWI):    {water_pct:.1f}% of pixels")
 
     # 3. Sun-glint correction
     print("  Applying sun-glint correction...")

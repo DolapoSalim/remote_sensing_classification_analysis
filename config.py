@@ -46,6 +46,10 @@ EPOCHS = [
 # ── Classification settings ───────────────────────────────────────────────
 TRAINING_YEAR = "2022"    # year to digitize training polygons on
 
+# Output filename suffix for downloaded rasters
+# RGBA = 4-band with alpha channel (transparent land)
+RASTER_SUFFIX = "RGBA"
+
 CLASS_MAP = {"seagrass": 1, "sand": 2, "rock": 3}
 CLASS_NAMES  = {1: "Seagrass", 2: "Sand", 3: "Rock"}
 CLASS_COLORS = {1: "#1a7a4a", 2: "#e8d5a3", 3: "#8c7b6b"}

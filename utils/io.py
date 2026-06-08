@@ -7,8 +7,8 @@ from pathlib import Path
 
 def read_rgb(tif_path):
     """
-    Read a 3-band RGB GeoTIFF.
-    Returns r, g, b arrays (float64) and the rasterio profile.
+    Read RGB bands from a GeoTIFF (works for both 3-band RGB and 4-band RGBA).
+    Always returns only R, G, B as float64 — alpha is ignored for analysis.
     """
     with rasterio.open(tif_path) as src:
         r = src.read(1).astype(np.float64)
@@ -16,6 +16,19 @@ def read_rgb(tif_path):
         b = src.read(3).astype(np.float64)
         profile = src.profile
     return r, g, b, profile
+
+
+def read_alpha_mask(tif_path):
+    """
+    Read the alpha channel from a 4-band RGBA GeoTIFF as a boolean mask.
+    True = valid/opaque pixel.  False = transparent (land/background).
+    Falls back to all-True if the file has only 3 bands.
+    """
+    with rasterio.open(tif_path) as src:
+        if src.count >= 4:
+            return src.read(4) > 0
+        h, w = src.height, src.width
+        return np.ones((h, w), dtype=bool)
 
 
 def save_raster(array, profile, out_path, dtype=rasterio.uint8, nodata=0):
