@@ -4,19 +4,23 @@
 # PURPOSE : Download orthophoto tiles from Regione Toscana WMS and
 #           assemble them into a georeferenced GeoTIFF per epoch.
 #
-# TRANSPARENCY STRATEGY:
-#   The WMS server clips imagery to the survey boundary (irregular polygon).
-#   Outside that boundary the server returns pure-white (255,255,255) pixels.
-#   We handle this in three layers:
-#     1. Request TRANSPARENT=TRUE → server returns 4-band RGBA when possible
-#     2. Fallback white-pixel mask → any R≥252, G≥252, B≥252 → alpha = 0
-#     3. Morphological cleanup → erode the valid-pixel mask by 2px to remove
-#        fringe artefacts at the survey edge
+# OUTPUT FORMAT: 3-band RGB GeoTIFF with NoData=0
+#   - Valid imagery pixels: RGB values from the server
+#   - Background / outside survey boundary: RGB = (0,0,0), flagged as NoData
+#   - QGIS and any GDAL tool will render NoData pixels as transparent,
+#     so the image sits cleanly over OSM / Google Satellite Hybrid
 #
-#   Result: irregular-boundary imagery with fully transparent background,
-#   loads cleanly over OSM / Google Satellite Hybrid in QGIS with no white edges.
+# WHY NOT RGBA:
+#   The server imagery is RGB. Transparency is handled via the GeoTIFF NoData
+#   metadata tag — no need for a 4th alpha band. This keeps the file format
+#   simple, compatible with all tools, and consistent with the preprocessing
+#   scripts which expect 3 bands.
 #
-# OUTPUT  : data/raw/pianosa_YYYY_RGBA.tif  (4-band R,G,B,Alpha)
+# BACKGROUND DETECTION:
+#   Outside the survey boundary the server returns pure white (255,255,255).
+#   We detect this with a threshold (R>=252, G>=252, B>=252) and write (0,0,0)
+#   instead, then declare 0 as NoData. A 2-pixel morphological erosion removes
+#   the antialiased fringe at the survey edge.
 #
 # RUN     : python 01_download/download_tiles.py
 # =============================================================================
@@ -34,11 +38,8 @@ from config import (BASE_URL, EPOCHS, RAW_DIR,
                     GSD, TILE_M, TILE_PX, OVERLAP_M,
                     TOTAL_W, TOTAL_H)
 
-# Pixels with all three channels >= this are treated as background (no data)
-WHITE_THRESHOLD = 252
-
-# Erode valid-pixel boundary by this many pixels to remove fringe artefacts
-EDGE_ERODE_PX = 2
+WHITE_THRESHOLD = 252   # R,G,B all >= this → background pixel
+EDGE_ERODE_PX   = 2     # erode valid mask by this many px to remove fringe
 
 
 # =============================================================================
@@ -55,7 +56,7 @@ def download_tile(wms_map, layer, tx_min, ty_min, tx_max, ty_max,
         f"&BBOX={tx_min},{ty_min},{tx_max},{ty_max}"
         f"&WIDTH={width_px}&HEIGHT={height_px}"
         f"&FORMAT=image/png"
-        f"&TRANSPARENT=TRUE"    # ask server for alpha — returns RGBA if supported
+        f"&TRANSPARENT=TRUE"
     )
     for attempt in range(retries):
         try:
@@ -70,74 +71,62 @@ def download_tile(wms_map, layer, tx_min, ty_min, tx_max, ty_max,
 
 
 # =============================================================================
-# BUILD ALPHA CHANNEL
-#
-# We combine three signals into a single alpha band:
-#   (a) Server alpha (band 4 of the PNG) — most accurate, not always present
-#   (b) White-pixel detection — catches background when server has no alpha
-#   (c) Edge erosion — removes the 1-2 px fringe where valid pixels blend
-#       with the white background, which causes a bright halo in QGIS
+# BACKGROUND MASK
+# Returns True where pixels are valid imagery (not background).
+# Uses server alpha band if present, then white-pixel detection,
+# then erodes the boundary to remove antialiased fringe.
 # =============================================================================
 
-def build_alpha(r_arr, g_arr, b_arr, server_alpha=None):
-    """
-    Returns alpha array (uint8): 0 = transparent, 255 = opaque.
-    """
-    # Start from server alpha or assume fully opaque
+def valid_mask(r_arr, g_arr, b_arr, server_alpha=None):
     if server_alpha is not None:
-        alpha = server_alpha.copy().astype(np.uint8)
+        valid = server_alpha > 0
     else:
-        alpha = np.full(r_arr.shape, 255, dtype=np.uint8)
+        valid = np.ones(r_arr.shape, dtype=bool)
 
-    # Mask out white / near-white background regardless of server alpha
-    # (server alpha can be incomplete at survey edges)
+    # Zero out white / near-white background
     white = (
         (r_arr >= WHITE_THRESHOLD) &
         (g_arr >= WHITE_THRESHOLD) &
         (b_arr >= WHITE_THRESHOLD)
     )
-    alpha[white] = 0
+    valid[white] = False
 
-    # Morphological erosion: shrink the valid region by EDGE_ERODE_PX
-    # to remove antialiased fringe pixels at the boundary
+    # Erode boundary to remove antialiased fringe pixels
     if EDGE_ERODE_PX > 0:
-        valid_mask = alpha > 0
-        eroded     = binary_erosion(
-            valid_mask,
-            structure=np.ones((EDGE_ERODE_PX * 2 + 1,
-                               EDGE_ERODE_PX * 2 + 1))
-        )
-        alpha[~eroded] = 0
+        struct = np.ones((EDGE_ERODE_PX * 2 + 1, EDGE_ERODE_PX * 2 + 1))
+        valid  = binary_erosion(valid, structure=struct)
 
-    return alpha
+    return valid
 
 
 # =============================================================================
-# MOSAIC ASSEMBLY
+# MOSAIC ASSEMBLY — 3-band RGB with NoData=0
 # =============================================================================
 
 def assemble_mosaic(year, wms_map, layer):
-    out_path = RAW_DIR / f"pianosa_{year}_RGBA.tif"
+    out_path = RAW_DIR / f"pianosa_{year}_RGB.tif"
     if out_path.exists():
         print(f"[SKIP] {out_path.name} already exists")
         return
 
     print(f"\n── {year} {'─'*45}")
-    print(f"   Full image: {TOTAL_W} × {TOTAL_H} px  |  4-band RGBA")
+    print(f"   Full image: {TOTAL_W:,} × {TOTAL_H:,} px  |  3-band RGB  |  NoData=0")
 
     driver  = gdal.GetDriverByName("GTiff")
     options = ["COMPRESS=LZW", "TILED=YES",
                "BLOCKXSIZE=512", "BLOCKYSIZE=512", "BIGTIFF=YES"]
 
-    ds = driver.Create(str(out_path), TOTAL_W, TOTAL_H, 4,
+    ds = driver.Create(str(out_path), TOTAL_W, TOTAL_H, 3,
                        gdal.GDT_Byte, options)
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(32632)
     ds.SetProjection(srs.ExportToWkt())
     ds.SetGeoTransform([XMIN, GSD, 0, YMAX, 0, -GSD])
 
-    # Tell GDAL band 4 is alpha so QGIS / GDAL respect it automatically
-    ds.GetRasterBand(4).SetColorInterpretation(gdal.GCI_AlphaBand)
+    # Set NoData = 0 on all three bands
+    # QGIS reads this and renders those pixels as transparent
+    for b in range(1, 4):
+        ds.GetRasterBand(b).SetNoDataValue(0)
 
     n_x = math.ceil(TOTAL_W / TILE_PX)
     n_y = math.ceil(TOTAL_H / TILE_PX)
@@ -179,10 +168,10 @@ def assemble_mosaic(year, wms_map, layer):
                                  dl_w, dl_h)
 
             if data is None:
-                print("FAILED — transparent fill")
+                print("FAILED — writing NoData zeros")
                 failed += 1
                 zeros = np.zeros((h_px, w_px), dtype=np.uint8)
-                for b in range(1, 5):
+                for b in range(1, 4):
                     ds.GetRasterBand(b).WriteArray(zeros, px_off, py_off)
                 continue
 
@@ -215,25 +204,26 @@ def assemble_mosaic(year, wms_map, layer):
             b_arr = read_band(3)
             server_alpha = read_band(4) if n_bands == 4 else None
 
-            alpha = build_alpha(r_arr, g_arr, b_arr, server_alpha)
+            # Build valid mask and zero out background pixels
+            mask = valid_mask(r_arr, g_arr, b_arr, server_alpha)
+            r_arr[~mask] = 0
+            g_arr[~mask] = 0
+            b_arr[~mask] = 0
 
-            ds.GetRasterBand(1).WriteArray(r_arr,  px_off, py_off)
-            ds.GetRasterBand(2).WriteArray(g_arr,  px_off, py_off)
-            ds.GetRasterBand(3).WriteArray(b_arr,  px_off, py_off)
-            ds.GetRasterBand(4).WriteArray(alpha,  px_off, py_off)
+            ds.GetRasterBand(1).WriteArray(r_arr, px_off, py_off)
+            ds.GetRasterBand(2).WriteArray(g_arr, px_off, py_off)
+            ds.GetRasterBand(3).WriteArray(b_arr, px_off, py_off)
 
             tile_ds = None
             os.unlink(tmp_path)
-
-            src_label = "RGBA" if server_alpha is not None else "RGB+mask"
-            print(f"OK ({src_label})")
+            print("OK")
 
     ds.FlushCache()
     ds = None
 
-    status = f"✓ Saved → {out_path}"
+    status = f" Saved → {out_path}"
     if failed:
-        status += f"  ⚠ {failed}/{total_tiles} tiles failed"
+        status += f"  {failed}/{total_tiles} tiles failed"
     print(f"  {status}")
 
 
@@ -243,8 +233,8 @@ def assemble_mosaic(year, wms_map, layer):
 
 if __name__ == "__main__":
     print(f"Output: {RAW_DIR}")
-    print(f"Format: 4-band RGBA — background transparent\n")
+    print("Format: 3-band RGB GeoTIFF  |  NoData=0 (transparent in QGIS)\n")
     for year, wms_map, layer in EPOCHS:
         assemble_mosaic(year, wms_map, layer)
-    print("\n✓ All epochs downloaded.")
-    print("Load the RGBA.tif directly over OSM/Google in QGIS — no white edges.")
+    print("\n All epochs downloaded.")
+    print("Run build_overviews.py next, then load the RGB.tif over your basemap.")

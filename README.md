@@ -58,7 +58,8 @@ pianosa_project/
 1.  Edit config.py with your paths and settings
 2.  pip install -r requirements.txt
 3.  python 01_download/download_tiles.py
-4.  python 02_preprocessing/preprocess.py
+4.  python 01_download/build_overviews.py    ← run right after download; fixes slow QGIS rendering
+5.  python 02_preprocessing/preprocess.py
 5.  [QGIS] Digitize training polygons → see 03_training/QGIS_GUIDE.md
 6.  python 03_training/extract_samples.py
 7.  python 04_classification/train_and_classify.py
