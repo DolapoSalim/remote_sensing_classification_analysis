@@ -60,7 +60,7 @@ def extract_samples(feature_stack, water_mask, profile, polygons_path):
     for class_name, class_id in CLASS_MAP.items():
         subset = gdf[gdf["class"] == class_name]
         if subset.empty:
-            print(f"  ⚠ No polygons for class '{class_name}'")
+            print(f" No polygons for class '{class_name}'")
             continue
 
         # Rasterize all polygons for this class at once
@@ -99,8 +99,8 @@ if __name__ == "__main__":
     # Check inputs
     if not TRAINING_POLYGONS.exists():
         print(f"ERROR: {TRAINING_POLYGONS} not found.")
-        print("  → Complete the QGIS digitizing step first.")
-        print("  → See 03_training/QGIS_GUIDE.md for instructions.")
+        print("  Complete the QGIS digitizing step first.")
+        print("  See 03_training/QGIS_GUIDE.md for instructions.")
         sys.exit(1)
 
     feat_path = PROCESSED_DIR / f"features_{TRAINING_YEAR}.npy"
