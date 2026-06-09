@@ -32,7 +32,7 @@ from utils.corrections import (compute_water_mask, sunglint_correction,
 # =============================================================================
 
 def build_feature_stack(year):
-    tif_path = RAW_DIR / f"pianosa_{year}_RGBA.tif"
+    tif_path = RAW_DIR / f"pianosa_{year}_RGB.tif"
     feat_out  = PROCESSED_DIR / f"features_{year}.npy"
     mask_out  = PROCESSED_DIR / f"watermask_{year}.npy"
 

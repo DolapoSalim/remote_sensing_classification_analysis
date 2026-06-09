@@ -8,12 +8,12 @@ from pathlib import Path
 def read_rgb(tif_path):
     """
     Read RGB bands from a GeoTIFF (works for both 3-band RGB and 4-band RGBA).
-    Always returns only R, G, B as float64 — alpha is ignored for analysis.
+    Always returns only R, G, B as float32 — alpha is ignored for analysis.
     """
     with rasterio.open(tif_path) as src:
-        r = src.read(1).astype(np.float64)
-        g = src.read(2).astype(np.float64)
-        b = src.read(3).astype(np.float64)
+        r = src.read(1).astype(np.float32)
+        g = src.read(2).astype(np.float32)
+        b = src.read(3).astype(np.float32)
         profile = src.profile
     return r, g, b, profile
 
