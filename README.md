@@ -1,81 +1,37 @@
-# Pianosa Benthic Habitat Mapping
-## Seagrass · Sand · Rock — Multi-epoch change detection (2016–2024)
+# Pianosa Habitat Change Analysis
 
----
+## Overview
+This pipeline quantifies Posidonia oceanica habitat extent and fragmentation
+change over Pianosa island (Tuscan Archipelago) from 2016 to 2024, using
+high-resolution aerial imagery (20cm GSD) from Regione Toscana WMS.
 
-## Directory structure
+## Data sources
+- Aerial imagery: Regione Toscana WMS (owsofc / owsofc_rt), 20cm GSD
+- Classification: GEE RF classifier (aerial + Sentinel-2, parallel pipelines)
+- Ground truth: Field-digitised polygons in QGIS (pianosa_GT.shp)
 
-```
-pianosa_project/
-│
-├── README.md                   ← you are here
-├── config.py                   ← shared settings (edit this first)
-├── requirements.txt
-│
-├── 01_download/
-│   └── download_tiles.py       ← WMS tile download & mosaic assembly
-│
-├── 02_preprocessing/
-│   └── preprocess.py           ← glint correction, water mask, Lyzenga indices, GLCM
-│
-├── 03_training/
-│   └── extract_samples.py      ← sample pixels from QGIS polygons
-│   └── QGIS_GUIDE.md           ← step-by-step digitizing guide
-│
-├── 04_classification/
-│   └── train_and_classify.py   ← train RF, classify all epochs
-│
-├── 05_validation/
-│   └── accuracy_assessment.py  ← confusion matrix, OA, Kappa
-│
-├── 06_change_detection/
-│   └── change_detection.py     ← per-epoch diff, transition matrix
-│
-├── 07_outputs/
-│   └── make_figures.py         ← publication-quality maps & charts
-│
-├── utils/
-│   ├── __init__.py
-│   ├── io.py                   ← shared raster read/write helpers
-│   └── corrections.py          ← glint, Lyzenga, water mask functions
-│
-├── data/
-│   ├── raw/                    ← pianosa_YYYY_RGB.tif (from step 01)
-│   ├── processed/              ← feature stacks (.npy) from step 02
-│   ├── classified/             ← classified GeoTIFFs from step 04
-│   └── change/                 ← change rasters from step 06
-│
-└── training_data/
-    ├── training_polygons.geojson   ← digitized in QGIS (step 03)
-    └── validation_points.geojson  ← separate validation set (step 05)
-```
-
----
-
-## Run order
-
-```
-1.  Edit config.py with your paths and settings
-2.  pip install -r requirements.txt
-3.  python 01_download/download_tiles.py
-4.  python 01_download/build_overviews.py    ← run right after download; fixes slow QGIS rendering
-5.  python 02_preprocessing/preprocess.py
-5.  [QGIS] Digitize training polygons → see 03_training/QGIS_GUIDE.md
-6.  python 03_training/extract_samples.py
-7.  python 04_classification/train_and_classify.py
-8.  [QGIS] Digitize validation points (separate from training)
-9.  python 05_validation/accuracy_assessment.py
-10. python 06_change_detection/change_detection.py
-11. python 07_outputs/make_figures.py
-```
-
----
+## Epochs
+2016, 2019, 2021, 2022, 2023, 2024
 
 ## Classes
+1 = posidonia
+2 = rock
+3 = sand
 
-| ID | Name      | QGIS colour  | Notes                          |
-|----|-----------|--------------|--------------------------------|
-|  1 | Seagrass  | Dark green   | Posidonia oceanica meadows     |
-|  2 | Sand      | Tan/yellow   | Unconsolidated sediment        |
-|  3 | Rock      | Grey-brown   | Consolidated substrate         |
-|  0 | No data   | Transparent  | Land / masked pixels           |
+## Pipeline order
+01_download_wms.py         → 00_raw_imagery/
+02_gt_split.py             → 01_ground_truth/
+03_mask_creation.py        → 03_masks/
+04_accuracy_assessment.py  → 06_accuracy_assessment/
+05_extent_calculation.py   → 04_extent_analysis/outputs/
+06_transition_matrix.py    → 04_extent_analysis/outputs/
+07_fragmentation.py        → 05_fragmentation_analysis/outputs/
+08_trend_analysis.py       → 04_extent_analysis/ + 05_fragmentation_analysis/
+09_figures.py              → 07_paper_figures/
+
+## Setup
+conda env create -f environment.yml
+conda activate pianosa_habitat
+
+## Citation
+Aerial imagery: 'ortofoto 20cm copyright Regione Toscana / AGEA / Consorzio TeA'

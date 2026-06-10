@@ -1,0 +1,23 @@
+name: pianosa_habitat
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - numpy
+  - rasterio
+  - geopandas
+  - shapely
+  - pandas
+  - matplotlib
+  - seaborn
+  - scipy
+  - scikit-learn
+  - fiona
+  - pyproj
+  - tqdm
+  - jupyter
+  - ipykernel
+  - pip
+  - pip:
+    - pylandstats
